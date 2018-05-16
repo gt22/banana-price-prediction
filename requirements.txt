@@ -1,0 +1,10 @@
+lxml
+websocket-client
+numpy
+gensim
+scipy
+nltk
+sklearn
+pandas
+stop_words
+kaggle
