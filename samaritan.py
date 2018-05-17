@@ -10,9 +10,8 @@ from stop_words import get_stop_words
 from typing import List, Dict
 import samaritan_funcs as fc
 from scipy.sparse import hstack
-from importlib import reload
 from time import sleep
-
+from importlib import reload
 
 # %%
 rmsle_list: Dict[str, List[float]] = {
@@ -20,6 +19,18 @@ rmsle_list: Dict[str, List[float]] = {
     'ridge': [0.],
     'lasso': [0.]
 }
+# %%
+
+
+def loss(model, name):
+    lst = rmsle_list[name]
+    lst.append(fc.rmsle(np.expm1(valid_label), np.expm1(np.clip(model.predict(valid_vect), 0, np.inf))))
+    print(name + ": ")
+    print("RMSLE: " + str(lst[-1]))
+    print("Prev: " + str(lst[-2]))
+    print("Diff: " + str(lst[-1] - lst[-2]))
+    print()
+    open('rmsle_%s.log' % name, 'a').write(str(lst[-1]) + '\n')
 
 
 def filter_word(d, w, c='item_description'):
@@ -72,8 +83,13 @@ preprocesser = pipeline.make_pipeline(preprocessing.FunctionTransformer(preproce
 df = preprocesser.fit_transform(df, np.log1p(df['price']))
 fc.alert("Preprocessing complete")
 # %%
-name_vectorizer = feature_extraction.text.TfidfVectorizer(max_features=25000, token_pattern='\w+', min_df=1)
-text_vectorizer = feature_extraction.text.TfidfVectorizer(max_features=25000, token_pattern='\w+', min_df=1,
+tfidf_params = {
+    'max_features': 200000,
+    'token_pattern': '\w+',
+    'min_df': 1
+}
+name_vectorizer = feature_extraction.text.TfidfVectorizer(**tfidf_params)
+text_vectorizer = feature_extraction.text.TfidfVectorizer(**tfidf_params,
                                                           ngram_range=(1, 2))
 vectorizer = pipeline.make_union(
     fc.on_field('name', name_vectorizer),
@@ -90,76 +106,37 @@ sample_vect = hstack([sample_frame[mean_cols], sample_vect], format='csr')
 del sample_frame
 collect()
 fc.alert("Vectorization complete")
-# %% train/test split
+# %#% train/test split
 (train_vect, valid_vect,
  train_label, valid_label) = model_selection.train_test_split(sample_vect,
                                                               np.log1p(df['price']),
                                                               test_size=.3,
                                                               random_state=6741)
-# %% fit linear regression
-param_grid = {
-    'alpha': [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1]
-}
-linreg = linear_model.LinearRegression()
-
-ridge = model_selection.GridSearchCV(linear_model.Ridge(alpha=1, random_state=6741), param_grid)
-lasso = model_selection.GridSearchCV(linear_model.Lasso(alpha=1, random_state=6741), param_grid)
-# %#%
-linreg.fit(train_vect, train_label)
-fc.alert("linreg")
-collect()
-# %#%
+# %#% fit linear regression
+# param_grid = {
+#     'alpha': [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1]
+# }
+# ridge = model_selection.GridSearchCV(linear_model.Ridge(alpha=1, random_state=6741), param_grid, n_jobs=6)
+ridge = linear_model.Ridge(alpha=1, random_state=6741)
 ridge.fit(train_vect, train_label)
-fc.alert("ridge")
 collect()
-# %#%
-lasso.fit(train_vect, train_label)
-fc.alert("lasso")
-collect()
-# %%
-
-
-def loss(model, name):
-    lst = rmsle_list[name]
-    lst.append(fc.rmsle(np.exp(valid_label), np.exp(np.clip(model.predict(valid_vect), 0, np.inf))))
-    print(name + ": ")
-    print("RMSLE: " + str(lst[-1]))
-    print("Prev: " + str(lst[-2]))
-    print("Diff: " + str(lst[-1] - lst[-2]))
-    print()
-    open('rmsle_%s.log' % name, 'a').write(str(lst[-1]))
-
-
-loss(linreg, "linreg")
 loss(ridge, "ridge")
-loss(lasso, "lasso")
-# fc.alert("Linear regression complete")
-# %%
-train_pred = pd.DataFrame({
-    'linreg': linreg.predict(valid_vect),
-    'ridge': ridge.predict(valid_vect),
-    'lasso': lasso.predict(valid_vect)
-})
-train_pred['blend'] = train_pred[['linreg', 'ridge', 'lasso']].agg('mean', axis=1)
-print("RMSLE: " + str(fc.rmsle(np.exp(valid_label), np.exp(np.clip(train_pred['blend'], 0, np.inf)))))
-
+fc.alert("Linear regression complete")
 # %%
 df_test = preprocesser.transform(df_test)
-# %%
+# %#%
 test_vect = vectorizer.transform(df_test[['name', 'text', 'shipping', 'item_condition_id']])
 test_vect = hstack([df_test[mean_cols], test_vect], format='csr')
 collect()
 fc.alert("Test vectorization complete")
-# %% create submission
+# %#% create submission
 submit = pd.DataFrame({
     'sample_id': df_test['sample_id'],
-    'linreg': linreg.predict(test_vect),
-    'ridge': ridge.predict(test_vect),
-    'lasso': lasso.predict(test_vect)
+    'ridge': ridge.predict(test_vect)
 })
-# %% calculate and submit
 # submit['price'] = np.exp(np.clip(submit['lasso'], 0, np.inf))
-submit['price'] = np.exp(np.clip(submit[['linreg', 'ridge']].agg('mean', axis=1), 0, np.inf))
+submit['price'] = np.expm1(np.clip(submit['ridge'], 0, np.inf))
 fc.submit(submit[['sample_id', 'price']])
-sleep(1)
+sleep(10)
+print()
 print(fc.get_kaggle_diff())

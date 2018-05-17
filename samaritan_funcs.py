@@ -9,6 +9,7 @@ from websocket import create_connection
 from pandas import DataFrame, Series, merge
 from typing import Tuple, List, Union, Callable, Iterable
 from sklearn.base import BaseEstimator, TransformerMixin
+from time import sleep
 
 
 def rmsle(y_true, y_pred) -> float:
@@ -45,7 +46,8 @@ def get_kaggle_score(best_fun=min) -> Tuple[float, float]:
         .stdout.decode('utf-8')
     lines: list = response.split('\n')[:-1]
     cols: list = lines[0]
-    pub_score = cols.index('publicScore')  # date field contains space, so +1
+    pub_score = cols.index('publicScore')
+    status = cols.index('status')
     scores = [line[pub_score:line.index(' ', pub_score)] for line in lines[2:]]
     scores = [float(s) for s in scores if s != 'None']
     cur_score = scores[0]
@@ -62,7 +64,7 @@ def submit(df: Union[DataFrame, Series], filename: str = 'data/submit.csv', inde
     df.to_csv(filename, index=index, header=True)
     system('gzip -f "%s"' % filename)
     system("kaggle competitions submit -c banana-price-prediction -f '%s.gz' -m ''" % filename)
-    remove(filename)
+    remove(filename + '.gz')
 
 
 class MeanTransformer(BaseEstimator, TransformerMixin):
